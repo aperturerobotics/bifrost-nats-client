@@ -1326,12 +1326,14 @@ func (nc *Conn) createConn() (err error) {
 	hosts := []string{}
 	u := nc.current.url
 
-	if net.ParseIP(u.Hostname()) == nil {
+	// Ignore if hostname is "local" (special value).
+	if hname := u.Hostname(); hname != "local" && net.ParseIP(u.Hostname()) == nil {
 		addrs, _ := net.LookupHost(u.Hostname())
 		for _, addr := range addrs {
 			hosts = append(hosts, net.JoinHostPort(addr, u.Port()))
 		}
 	}
+
 	// Fall back to what we were given.
 	if len(hosts) == 0 {
 		hosts = append(hosts, u.Host)
