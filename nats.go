@@ -147,11 +147,6 @@ func GetDefaultOptions() Options {
 	}
 }
 
-// DEPRECATED: Use GetDefaultOptions() instead.
-// DefaultOptions is not safe for use by multiple clients.
-// For details see #308.
-var DefaultOptions = GetDefaultOptions()
-
 // Status represents the state of the connection.
 type Status int
 
@@ -312,13 +307,6 @@ type Options struct {
 	// no longer be connected.
 	ClosedCB ConnHandler
 
-	// DisconnectedCB sets the disconnected handler that is called
-	// whenever the connection is disconnected.
-	// Will not be called if DisconnectedErrCB is set
-	// DEPRECATED. Use DisconnectedErrCB which passes error that caused
-	// the disconnect event.
-	DisconnectedCB ConnHandler
-
 	// DisconnectedErrCB sets the disconnected error handler that is called
 	// whenever the connection is disconnected.
 	// Disconnected error could be nil, for instance when user explicitly closes the connection.
@@ -369,10 +357,6 @@ type Options struct {
 
 	// TokenHandler designates the function used to generate the token to be used when connecting to a server.
 	TokenHandler AuthTokenHandler
-
-	// Dialer allows a custom net.Dialer when forming connections.
-	// DEPRECATED: should use CustomDialer instead.
-	Dialer *net.Dialer
 
 	// CustomDialer allows to specify a custom dialer (not necessarily
 	// a *net.Dialer).
@@ -826,15 +810,6 @@ func DisconnectErrHandler(cb ConnErrHandler) Option {
 	}
 }
 
-// DisconnectHandler is an Option to set the disconnected handler.
-// DEPRECATED: Use DisconnectErrHandler.
-func DisconnectHandler(cb ConnHandler) Option {
-	return func(o *Options) error {
-		o.DisconnectedCB = cb
-		return nil
-	}
-}
-
 // ReconnectHandler is an Option to set the reconnected handler.
 func ReconnectHandler(cb ConnHandler) Option {
 	return func(o *Options) error {
@@ -960,16 +935,6 @@ func SyncQueueLen(max int) Option {
 	}
 }
 
-// Dialer is an Option to set the dialer which will be used when
-// attempting to establish a connection.
-// DEPRECATED: Should use CustomDialer instead.
-func Dialer(dialer *net.Dialer) Option {
-	return func(o *Options) error {
-		o.Dialer = dialer
-		return nil
-	}
-}
-
 // SetCustomDialer is an Option to set a custom dialer which will be
 // used when attempting to establish a connection. If both Dialer
 // and CustomDialer are specified, CustomDialer takes precedence.
@@ -1020,17 +985,6 @@ func RetryOnFailedConnect(retry bool) Option {
 }
 
 // Handler processing
-
-// SetDisconnectHandler will set the disconnect event handler.
-// DEPRECATED: Use SetDisconnectErrHandler
-func (nc *Conn) SetDisconnectHandler(dcb ConnHandler) {
-	if nc == nil {
-		return
-	}
-	nc.mu.Lock()
-	defer nc.mu.Unlock()
-	nc.Opts.DisconnectedCB = dcb
-}
 
 // SetDisconnectErrHandler will set the disconnect event handler.
 func (nc *Conn) SetDisconnectErrHandler(dcb ConnErrHandler) {
@@ -1121,13 +1075,6 @@ func (o Options) Connect() (*Conn, error) {
 	// Check if we have an nkey but no signature callback defined.
 	if nc.Opts.Nkey != "" && nc.Opts.SignatureCB == nil {
 		return nil, ErrNkeyButNoSigCB
-	}
-
-	// Allow custom Dialer for connecting using DialTimeout by default
-	if nc.Opts.Dialer == nil {
-		nc.Opts.Dialer = &net.Dialer{
-			Timeout: nc.Opts.Timeout,
-		}
 	}
 
 	if err := nc.setupServerPool(); err != nil {
@@ -1396,9 +1343,9 @@ func (nc *Conn) createConn() (err error) {
 	dialer := nc.Opts.CustomDialer
 	if dialer == nil {
 		// We will copy and shorten the timeout if we have multiple hosts to try.
-		copyDialer := *nc.Opts.Dialer
+		copyDialer := &net.Dialer{Timeout: nc.Opts.Timeout}
 		copyDialer.Timeout = copyDialer.Timeout / time.Duration(len(hosts))
-		dialer = &copyDialer
+		dialer = copyDialer
 	}
 
 	if len(hosts) > 1 && !nc.Opts.NoRandomize {
@@ -1948,12 +1895,9 @@ func (nc *Conn) doReconnect(err error) {
 	// Clear any errors.
 	nc.err = nil
 	// Perform appropriate callback if needed for a disconnect.
-	// DisconnectedErrCB has priority over deprecated DisconnectedCB
 	if !nc.initc {
 		if nc.Opts.DisconnectedErrCB != nil {
 			nc.ach.push(func() { nc.Opts.DisconnectedErrCB(nc, err) })
-		} else if nc.Opts.DisconnectedCB != nil {
-			nc.ach.push(func() { nc.Opts.DisconnectedCB(nc) })
 		}
 	}
 
@@ -3634,13 +3578,6 @@ func (s *Subscription) processNextMsgDelivered(msg *Msg) error {
 	return nil
 }
 
-// Queued returns the number of queued messages in the client for this subscription.
-// DEPRECATED: Use Pending()
-func (s *Subscription) QueuedMsgs() (int, error) {
-	m, _, err := s.Pending()
-	return int(m), err
-}
-
 // Pending returns the number of queued messages and queued bytes in the client for this subscription.
 func (s *Subscription) Pending() (int, int, error) {
 	if s == nil {
@@ -4058,8 +3995,6 @@ func (nc *Conn) close(status Status, doCBs bool, err error) {
 		if nc.conn != nil {
 			if nc.Opts.DisconnectedErrCB != nil {
 				nc.ach.push(func() { nc.Opts.DisconnectedErrCB(nc, err) })
-			} else if nc.Opts.DisconnectedCB != nil {
-				nc.ach.push(func() { nc.Opts.DisconnectedCB(nc) })
 			}
 		}
 		if nc.Opts.ClosedCB != nil {
